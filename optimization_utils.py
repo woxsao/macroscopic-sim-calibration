@@ -182,7 +182,7 @@ def metanet_param_fit(
     model = ConcreteModel()
     model.t = RangeSet(0, num_timesteps - 1)
     model.i = RangeSet(0, num_segments - 1)
-    model.segment_ix = RangeSet(0, num_calibrated_segments - 1)
+    # model.i = RangeSet(0, num_calibrated_segments - 1)
     model.num_segments = num_segments
     model.num_calibrated_segments = num_calibrated_segments
 
@@ -193,36 +193,36 @@ def metanet_param_fit(
     # Number of lanes (per calibrated segment)
     if lane_mapping is not None:
         print(lane_mapping)
-        model.n_lanes = Param(model.segment_ix, initialize={i: lane_mapping[i] for i in model.i})
+        model.n_lanes = Param(model.i, initialize={i: lane_mapping[i] for i in model.i})
     elif varylanes:
-        model.n_lanes = Var(model.segment_ix, bounds=(3, 5), initialize=3)
+        model.n_lanes = Var(model.i, bounds=(3, 5), initialize=3)
     else:
-        model.n_lanes = Param(model.segment_ix, initialize=4)
+        model.n_lanes = Param(model.i, initialize=4)
 
     # Parameters to estimate
-    model.eta_high = Var(model.segment_ix, bounds=(1.0, 90.0), initialize=30.0)
+    model.eta_high = Var(model.i, bounds=(1.0, 90.0), initialize=30.0)
     model.tau = Var(
-        model.segment_ix, bounds=(1.0 / 3600, 60.0 / 3600), initialize=18 / 3600
+        model.i, bounds=(1.0 / 3600, 60.0 / 3600), initialize=18 / 3600
     )
-    model.K = Var(model.segment_ix, bounds=(1.0, 50.0), initialize=40.0)
+    model.K = Var(model.i, bounds=(1.0, 50.0), initialize=40.0)
     model.rho_crit = Var(
-        model.segment_ix, bounds=(1e-2, np.max(rho_hat)), initialize=37.45
+        model.i, bounds=(1e-2, np.max(rho_hat)), initialize=37.45
     )
-    model.v_free = Var(model.segment_ix, bounds=(50, 150), initialize=120.0)
-    model.a = Var(model.segment_ix, bounds=(0.01, 10), initialize=1.4)
+    model.v_free = Var(model.i, bounds=(50, 150), initialize=120.0)
+    model.a = Var(model.i, bounds=(0.01, 10), initialize=1.4)
 
     if include_ramping:
-        # model.gamma = Var(model.segment_ix, bounds=(0.5, 1.5), initialize=1)
-        model.beta = Var(model.segment_ix, bounds=(1e-3, 0.9999), initialize=1e-3)
-        model.r_inflow = Var(model.segment_ix, bounds=(1e-3, 2000), initialize=1e-3)
+        # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
+        model.beta = Var(model.i, bounds=(1e-3, 0.9999), initialize=1e-3)
+        model.r_inflow = Var(model.i, bounds=(1e-3, 2000), initialize=1e-3)
 
-        # model.beta = Var(model.segment_ix, bounds=(0.0, 0.0), initialize=0.0)
-        # model.r_inflow = Var(model.segment_ix, bounds=(-2000, 2000), initialize=200)
-        # model.beta = Var(model.segment_ix, bounds=(-1.0, 1.0), initialize=0.5)
-        # model.r_inflow = Var(model.segment_ix, bounds=(0.0, 0.0), initialize=0.0)
+        # model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
+        # model.r_inflow = Var(model.i, bounds=(-2000, 2000), initialize=200)
+        # model.beta = Var(model.i, bounds=(-1.0, 1.0), initialize=0.5)
+        # model.r_inflow = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
     else:
-        model.beta = Var(model.segment_ix, bounds=(0.0, 0.0), initialize=0.0)
-        model.r_inflow = Var(model.segment_ix, bounds=(0.0, 0.0), initialize=0.0)
+        model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
+        model.r_inflow = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
 
     # Variables to predict (per-lane values)
     model.v_pred = Var(
