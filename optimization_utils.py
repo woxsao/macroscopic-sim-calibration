@@ -16,6 +16,14 @@ from pyomo.environ import (
 import pyomo.environ as pyo
 
 
+def smooth_inflow(inflow, window_size=2):
+    kernel = np.ones(window_size) / window_size
+    smoothed = np.apply_along_axis(
+        lambda m: np.convolve(m, kernel, mode="same"), axis=0, arr=inflow
+    )
+    return smoothed
+
+
 def fit_fd1(
     flattened_rho_hat,
     flattened_q_hat,
@@ -164,10 +172,12 @@ def metanet_param_fit(
     num_calibrated_segments,
     include_ramping=True,
     varylanes=True,
+    lane_mapping=None
 ):
     initial_flow_or = initial_traffic_state
 
     num_timesteps, num_segments = v_hat.shape
+    print(num_timesteps, num_segments)
 
     model = ConcreteModel()
     model.t = RangeSet(0, num_timesteps - 1)
@@ -181,10 +191,14 @@ def metanet_param_fit(
     model.l = Param(initialize=l)
 
     # Number of lanes (per calibrated segment)
-    if varylanes:
+    if lane_mapping is not None:
+        print(lane_mapping)
+        model.n_lanes = Param(model.segment_ix, initialize={i: lane_mapping[i] for i in model.i})
+    elif varylanes:
         model.n_lanes = Var(model.segment_ix, bounds=(3, 5), initialize=3)
     else:
-        model.n_lanes = Var(model.segment_ix, bounds=(4, 4), initialize=4)
+        model.n_lanes = Param(model.segment_ix, initialize=4)
+
     # Parameters to estimate
     model.eta_high = Var(model.segment_ix, bounds=(1.0, 90.0), initialize=30.0)
     model.tau = Var(
@@ -192,10 +206,10 @@ def metanet_param_fit(
     )
     model.K = Var(model.segment_ix, bounds=(1.0, 50.0), initialize=40.0)
     model.rho_crit = Var(
-        model.segment_ix, bounds=(1e-2, np.max(rho_hat)), initialize=20.0
+        model.segment_ix, bounds=(1e-2, np.max(rho_hat)), initialize=37.45
     )
     model.v_free = Var(model.segment_ix, bounds=(50, 150), initialize=120.0)
-    model.a = Var(model.segment_ix, bounds=(0.01, 10), initialize=1.0)
+    model.a = Var(model.segment_ix, bounds=(0.01, 10), initialize=1.4)
 
     if include_ramping:
         # model.gamma = Var(model.segment_ix, bounds=(0.5, 1.5), initialize=1)
@@ -220,7 +234,7 @@ def metanet_param_fit(
     model.rho_pred = Var(
         model.t,
         model.i,
-        bounds=(1e-3, 300),
+        bounds=(1e-3, 400),
         initialize={(t, i): float(rho_hat[t, i]) for t in model.t for i in model.i},
     )
     model.q_pred = Var(
@@ -415,6 +429,8 @@ def run_calibration(
     num_calibrated_segments=1,
     include_ramping=True,
     varylanes=True,
+    lane_mapping=None,
+    smoothing=True
 ):
     """
     Run METANET parameter calibration with configurable segment grouping.
@@ -455,13 +471,6 @@ def run_calibration(
         term3 = (eta * T) / (tau * l) * (next_density - density) / (density + K)
         return current + term1 + term2 - term3
 
-    def smooth_inflow(inflow, window_size=2):
-        kernel = np.ones(window_size) / window_size
-        smoothed = np.apply_along_axis(
-            lambda m: np.convolve(m, kernel, mode="same"), axis=0, arr=inflow
-        )
-        return smoothed
-
     # Ensure no divide-by-zero
     rho_hat = np.where(rho_hat == 0.0, 1e-3, rho_hat)
     q_hat = np.where(q_hat == 0.0, 1e-3, q_hat)
@@ -497,12 +506,17 @@ def run_calibration(
         segment_q_hat = q_hat[:, start_idx:end_idx]
 
         # Boundary conditions depend on group position
-        initial_flow = smooth_inflow(
-            q_hat[:, start_idx - 1 : start_idx]
-        )  # upstream inflow
-        downstream_density = smooth_inflow(
-            rho_hat[:, end_idx : end_idx + 1]
-        )  # downstream density
+        if smoothing:
+            initial_flow = smooth_inflow(
+                q_hat[:, start_idx - 1 : start_idx]
+            )  # upstream inflow
+            downstream_density = smooth_inflow(
+                rho_hat[:, end_idx : end_idx + 1]
+            )  # downstream density
+        else:
+            initial_flow = q_hat[:, start_idx - 1 : start_idx]
+            downstream_density = rho_hat[:, end_idx : end_idx + 1]
+
         # Run calibration for this block
         res_model = metanet_param_fit(
             segment_v_hat,
@@ -515,6 +529,7 @@ def run_calibration(
             num_calibrated_segments,
             include_ramping=include_ramping,
             varylanes=varylanes,
+            lane_mapping=lane_mapping,
         )
 
         num_timesteps, num_segments = segment_v_hat.shape
