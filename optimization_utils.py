@@ -199,8 +199,8 @@ def metanet_param_fit(
 
     if include_ramping:
         # model.gamma = Var(model.segment_ix, bounds=(0.5, 1.5), initialize=1)
-        model.beta = Var(model.segment_ix, bounds=(1e-3, 1.0), initialize=0.5)
-        model.r_inflow = Var(model.segment_ix, bounds=(1e-3, 2000), initialize=200)
+        model.beta = Var(model.segment_ix, bounds=(1e-3, 0.9999), initialize=1e-3)
+        model.r_inflow = Var(model.segment_ix, bounds=(1e-3, 2000), initialize=1e-3)
 
         # model.beta = Var(model.segment_ix, bounds=(0.0, 0.0), initialize=0.0)
         # model.r_inflow = Var(model.segment_ix, bounds=(-2000, 2000), initialize=200)
@@ -255,10 +255,9 @@ def metanet_param_fit(
 
     # Dynamics functions
     def density_dynamics(current, inflow, outflow, T, l, lanes, beta, r_inflow):
-
-        return current + T / (l) * (
-            inflow - (1 + beta) * outflow + r_inflow
-        )  # add r(t)- s(t)
+        return current + T / l * (
+            inflow - outflow / (1 - beta) + r_inflow
+        ) # add r(t)- s(t)
 
     def calculate_V(m, rho, VSL, seg):
         return m.v_free[seg] * pyo.exp(
@@ -307,7 +306,6 @@ def metanet_param_fit(
             )
 
     model.rho_dyn = Constraint(model.t, model.i, rule=rho_update)
-
     # Velocity dynamics
     VSL = 150
 
@@ -342,45 +340,46 @@ def metanet_param_fit(
     model.v_dyn = Constraint(model.t, model.i, rule=v_update)
 
     # Objective: per-lane error
-    # def loss_fn(m):
-    #     v_max = max(m.v_hat[t, i] for t in m.t for i in m.i)
-    #     rho_max = max(m.rho_hat[t, i] for t in m.t for i in m.i)
-    #     q_max = max(m.q_hat[t, i] for t in m.t for i in m.i)
-
-    #     return sum(
-    #         (20*((m.v_pred[t, i] - m.v_hat[t, i]) / v_max) ** 2)
-    #         + ((m.rho_pred[t, i] - m.rho_hat[t, i]) / rho_max) ** 2
-    #         + ((m.q_pred[t, i] - m.q_hat[t, i]) / q_max) ** 2
-    #         for t in m.t
-    #         for i in m.i
-    #     )
     def loss_fn(m):
-        # --- Precompute max values for normalization ---
         v_max = max(m.v_hat[t, i] for t in m.t for i in m.i)
         rho_max = max(m.rho_hat[t, i] for t in m.t for i in m.i)
         q_max = max(m.q_hat[t, i] for t in m.t for i in m.i)
 
-        # --- Precompute inflow_hat (fixed, based on data) ---
-        inflow_hat = np.zeros((num_timesteps, num_segments))
-        inflow_hat[:, 0] = q_hat[:, 0] - initial_flow_or[:, 0]
-        inflow_hat[:, 1:] = q_hat[:, 1:] - q_hat[:, :-1]
-
-        # --- Construct inflow_pred expression using Pyomo vars ---
-        inflow_pred_expr = {}
-        for t in m.t:
-            inflow_pred_expr[t, 0] = m.q_pred[t, 0] - initial_flow_or[t, 0]
-            for i in m.i:
-                if i > 0:
-                    inflow_pred_expr[t, i] = m.q_pred[t, i] - m.q_pred[t, i - 1]
-
-        # --- Loss expression ---
         return sum(
-            20 * ((m.v_pred[t, i] - m.v_hat[t, i]) / v_max) ** 2
+            (20 * ((m.v_pred[t, i] - m.v_hat[t, i]) / v_max) ** 2)
             + ((m.rho_pred[t, i] - m.rho_hat[t, i]) / rho_max) ** 2
-            + ((inflow_pred_expr[t, i] - inflow_hat[t, i]) / q_max) ** 2
+            + ((m.q_pred[t, i] - m.q_hat[t, i]) / q_max) ** 2
             for t in m.t
             for i in m.i
         )
+
+    # def loss_fn(m):
+    #     # --- Precompute max values for normalization ---
+    #     v_max = max(m.v_hat[t, i] for t in m.t for i in m.i)
+    #     rho_max = max(m.rho_hat[t, i] for t in m.t for i in m.i)
+    #     q_max = max(m.q_hat[t, i] for t in m.t for i in m.i)
+
+    #     # --- Precompute inflow_hat (fixed, based on data) ---
+    #     inflow_hat = np.zeros((num_timesteps, num_segments))
+    #     inflow_hat[:, 0] = q_hat[:, 0] - initial_flow_or[:, 0]
+    #     inflow_hat[:, 1:] = q_hat[:, 1:] - q_hat[:, :-1]
+
+    #     # --- Construct inflow_pred expression using Pyomo vars ---
+    #     inflow_pred_expr = {}
+    #     for t in m.t:
+    #         inflow_pred_expr[t, 0] = m.q_pred[t, 0] - initial_flow_or[t, 0]
+    #         for i in m.i:
+    #             if i > 0:
+    #                 inflow_pred_expr[t, i] = m.q_pred[t, i] - m.q_pred[t, i - 1]
+
+    #     # --- Loss expression ---
+    #     return sum(
+    #         20 * ((m.v_pred[t, i] - m.v_hat[t, i]) / v_max) ** 2
+    #         + ((m.rho_pred[t, i] - m.rho_hat[t, i]) / rho_max) ** 2
+    #         + ((inflow_pred_expr[t, i] - inflow_hat[t, i]) / q_max) ** 2
+    #         for t in m.t
+    #         for i in m.i
+    #     )
 
     # def loss_fn(m):
     #     return sum(
