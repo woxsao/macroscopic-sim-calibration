@@ -175,9 +175,19 @@ def metanet_param_fit(
     lane_mapping=None
 ):
     initial_flow_or = initial_traffic_state
+    
+    if initial_flow_or.ndim == 1:
+        initial_flow_or = initial_flow_or.reshape(-1, 1)
+    
+    if downstream_density.ndim == 1:
+        downstream_density = downstream_density.reshape(-1, 1)
+    
+     # Ensure no divide-by-zero
 
     num_timesteps, num_segments = v_hat.shape
     print(num_timesteps, num_segments)
+    print(initial_flow_or.shape)
+    print(downstream_density.shape)
 
     model = ConcreteModel()
     model.t = RangeSet(0, num_timesteps - 1)
@@ -427,6 +437,7 @@ def run_calibration(
     T,
     l,
     num_calibrated_segments=1,
+    sep_boundary_conditions=None,
     include_ramping=True,
     varylanes=True,
     lane_mapping=None,
@@ -477,8 +488,6 @@ def run_calibration(
     v_hat = q_hat / rho_hat
     v_hat = np.where(v_hat == 0.0, 1e-3, v_hat)
 
-    total_segments = rho_hat.shape[1] - 2  # exclude first + last
-
     # Initialize results storage
     results = {
         "v_pred": [],
@@ -495,9 +504,13 @@ def run_calibration(
         # results["gamma"] = []
         results["beta"] = []
         results["r_inflow"] = []
+        
 
+    total_segments = rho_hat.shape[1] - 2 if sep_boundary_conditions is None else rho_hat.shape[1] # exclude first + last for boundary cond
     # Loop through groups of segments
-    for start_idx in range(1, total_segments + 1, num_calibrated_segments):
+    start_segment = 1 if sep_boundary_conditions is None else 0
+
+    for start_idx in range(start_segment, total_segments + 1, num_calibrated_segments):
         end_idx = min(start_idx + num_calibrated_segments, total_segments + 1)
         print(start_idx, end_idx)
         # Slice for this group
@@ -506,16 +519,16 @@ def run_calibration(
         segment_q_hat = q_hat[:, start_idx:end_idx]
 
         # Boundary conditions depend on group position
-        if smoothing:
-            initial_flow = smooth_inflow(
-                q_hat[:, start_idx - 1 : start_idx]
-            )  # upstream inflow
-            downstream_density = smooth_inflow(
-                rho_hat[:, end_idx : end_idx + 1]
-            )  # downstream density
+        if sep_boundary_conditions is not None:
+            initial_flow = sep_boundary_conditions["initial_flow"]
+            downstream_density = sep_boundary_conditions["downstream_density"]
         else:
-            initial_flow = q_hat[:, start_idx - 1 : start_idx]
+            initial_flow = q_hat[:, start_idx - 1 : start_idx]  # upstream inflow
             downstream_density = rho_hat[:, end_idx : end_idx + 1]
+
+        if smoothing:
+            initial_flow = smooth_inflow(initial_flow)  # upstream inflow
+            downstream_density = smooth_inflow(downstream_density)  # downstream density
 
         # Run calibration for this block
         res_model = metanet_param_fit(
