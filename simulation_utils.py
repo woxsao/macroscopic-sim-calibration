@@ -176,14 +176,16 @@ def metanet_step(t: int,
         flow_tp1[i] = flow_dynamics(density_tp1[i], velocity_tp1[i], lanes[i])
 
     # --- origin flow update (only when not using real data) ---
-    if not real_data:
-        pcrit0 = _get_time_space_param(params["p_crit"], t, 0)
-        qcap0 = _get_time_space_param(params["q_capacity"], t, 0)
+    if t+1 >= demand.shape[0]:
+        flow_origin_tp1 = 0
+    elif real_data:
+        flow_origin_tp1 = flow_origin_t
+    else:
+        pcrit0 = _get_time_space_param(params["p_crit"], t+1, 0)
+        qcap0 = _get_time_space_param(params["q_capacity"], t+1, 0)
         flow_origin_tp1 = origin_flow_dynamics_MN(
             demand[t + 1], density_tp1[0], queue_tp1, lanes[0], T, p_max=180.0, p_crit=pcrit0, q_capacity=qcap0
         )
-    else:
-        flow_origin_tp1 = flow_origin_t
 
     return density_tp1, velocity_tp1, queue_tp1, flow_origin_tp1, flow_tp1
 
