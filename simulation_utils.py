@@ -24,6 +24,10 @@ def queue_dynamics(current: float, demand: float, flow_origin: float, T: float) 
 
 def calculate_V(rho: float, v_ctrl: float, a: float, p_crit: float, v_free: float = 150.0) -> float:
     """Desired speed function V(rho), capped by control speed v_ctrl."""
+    # prevent overflow warnings
+    # p_crit += 1e-4
+    # a += 1e-4
+    # assert - (rho / p_crit) ** a / a < 700, f"Overflow in desired speed calculation, pow too large: { - (rho / p_crit) ** a / a}, rho={rho}, p_crit={p_crit}, a={a}"
     return min(v_free * np.exp(- (rho / p_crit) ** a / a), v_ctrl)
 
 
