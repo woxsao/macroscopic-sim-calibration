@@ -16,10 +16,30 @@ from pyomo.environ import (
 import pyomo.environ as pyo
 
 
+# def smooth_inflow(inflow, window_size=2):
+#     kernel = np.ones(window_size) / window_size
+#     smoothed = np.apply_along_axis(
+#         lambda m: np.convolve(m, kernel, mode="same"), axis=0, arr=inflow
+#     )
+#     return smoothed
+
 def smooth_inflow(inflow, window_size=2):
+    # Create averaging kernel
     kernel = np.ones(window_size) / window_size
+    
+    # Compute asymmetric padding for even window sizes
+    pad_left = window_size // 2
+    pad_right = window_size - pad_left - 1
+
+    # Pad using boundary values (edge padding)
+    if inflow.ndim == 1:
+        padded = np.pad(inflow, (pad_left, pad_right), mode='edge')
+    else:
+        padded = np.pad(inflow, ((pad_left, pad_right), (0, 0)), mode='edge')
+
+    # Convolve along time dimension
     smoothed = np.apply_along_axis(
-        lambda m: np.convolve(m, kernel, mode="same"), axis=0, arr=inflow
+        lambda m: np.convolve(m, kernel, mode="valid"), axis=0, arr=padded
     )
     return smoothed
 
@@ -425,7 +445,9 @@ def metanet_param_fit(
     # Solve
     solver = SolverFactory("ipopt")
     solver.options["max_iter"] = 20000
-    solver.solve(model, tee=False)
+    solver.options['acceptable_constr_viol_tol'] = 1e-12
+    solver.options['constr_viol_tol'] = 1e-12
+    solver.solve(model, tee=True)
 
     return model
 
@@ -482,10 +504,10 @@ def run_calibration(
         return current + term1 + term2 - term3
 
     # Ensure no divide-by-zero
-    rho_hat = np.where(rho_hat == 0.0, 1e-3, rho_hat)
-    q_hat = np.where(q_hat == 0.0, 1e-3, q_hat)
+    # rho_hat = np.where(rho_hat == 0.0, 1e-3, rho_hat)
+    # q_hat = np.where(q_hat == 0.0, 1e-3, q_hat)
     v_hat = q_hat / rho_hat
-    v_hat = np.where(v_hat == 0.0, 1e-3, v_hat)
+    # v_hat = np.where(v_hat == 0.0, 1e-3, v_hat)
 
     # Initialize results storage
     results = {

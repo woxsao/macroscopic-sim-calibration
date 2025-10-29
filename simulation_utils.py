@@ -28,7 +28,7 @@ def calculate_V(rho: float, v_ctrl: float, a: float, p_crit: float, v_free: floa
     # p_crit += 1e-4
     # a += 1e-4
     # assert - (rho / p_crit) ** a / a < 700, f"Overflow in desired speed calculation, pow too large: { - (rho / p_crit) ** a / a}, rho={rho}, p_crit={p_crit}, a={a}"
-    return min(v_free * np.exp(- (rho / p_crit) ** a / a), v_ctrl)
+    return v_free * np.exp(- (rho / p_crit) ** a / a)
 
 
 def calculate_V_arr(rho_arr: np.ndarray, v_ctrl_arr: np.ndarray, a: float, p_crit: float, v_free: float) -> np.ndarray:
