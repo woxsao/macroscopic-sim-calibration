@@ -243,7 +243,7 @@ def metanet_param_fit(
 
     if include_ramping:
         # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
-        model.beta = Var(model.i, bounds=(1e-3, 0.9999), initialize=1e-3)
+        model.beta = Var(model.i, bounds=(1e-3, 0.9), initialize=1e-3)
         model.r_inflow = Var(model.i, bounds=(1e-3, 2000), initialize=1e-3)
 
         # model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
@@ -444,6 +444,12 @@ def metanet_param_fit(
 
     # Solve
     solver = SolverFactory("ipopt")
+    solver.options["tol"] = 1e-15
+    solver.options["constr_viol_tol"] = 1e-10    # constraint violation tolerance
+    solver.options["acceptable_tol"] = 1e-9      # early stopping criterion
+    solver.options["acceptable_constr_viol_tol"] = 1e-9
+    solver.options["dual_inf_tol"] = 1e-10       # dual infeasibility tolerance
+    solver.options["compl_inf_tol"] = 1e-10       
     solver.options["max_iter"] = 20000
     solver.options['acceptable_constr_viol_tol'] = 1e-12
     solver.options['constr_viol_tol'] = 1e-12
