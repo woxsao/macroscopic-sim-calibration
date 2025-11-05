@@ -399,3 +399,99 @@ def plot_matrices(
     # Adjust layout and show the plots
     plt.tight_layout()
     plt.show()
+def get_ramps_per_segment(ramps_path, space_interval=400, direction="west",
+                          min_pos=None, max_pos=None):
+    """
+    Computes binary on/off ramp indicators per 400 m segment along the highway.
+    Allows specifying a fixed spatial range via min_pos and max_pos (in meters).
+    """
+    MILE_TO_METER = 1609.34
+
+    # Load and convert ramp coordinates
+    ramps_df = pd.read_csv(ramps_path).copy()
+    ramps_df["x_m"] = ramps_df["x_rcs_miles"] * MILE_TO_METER
+
+    # Use provided min/max range if given
+    if min_pos is None:
+        min_pos = ramps_df["x_m"].min()
+    if max_pos is None:
+        max_pos = ramps_df["x_m"].max()
+
+    # Uniform bins
+    space_bins = np.arange(min_pos, max_pos + space_interval, space_interval)
+    bin_midpoints_m = 0.5 * (space_bins[:-1] + space_bins[1:])
+
+    on_ramp = np.zeros(len(space_bins) - 1, dtype=bool)
+    off_ramp = np.zeros(len(space_bins) - 1, dtype=bool)
+
+    for i in range(len(space_bins) - 1):
+        seg_start, seg_end = space_bins[i], space_bins[i + 1]
+        in_bin = (ramps_df["x_m"] >= seg_start) & (ramps_df["x_m"] < seg_end)
+
+        if in_bin.any():
+            if (ramps_df.loc[in_bin, "entry_node"].astype(str).str.upper() == "TRUE").any():
+                on_ramp[i] = True
+            if (ramps_df.loc[in_bin, "exit_node"].astype(str).str.upper() == "TRUE").any():
+                off_ramp[i] = True
+
+    if direction == "west":
+        on_ramp = on_ramp[::-1]
+        off_ramp = off_ramp[::-1]
+        space_bins = space_bins[::-1]
+        bin_midpoints_m = bin_midpoints_m[::-1]
+
+    return on_ramp, off_ramp, space_bins, bin_midpoints_m
+
+def get_lanes_per_segment(lanes_path, space_interval=400, direction="west",
+                          min_pos=None, max_pos=None):
+    """
+    Computes weighted average lane count for each 400 m segment along the highway.
+    Allows specifying a fixed spatial range via min_pos and max_pos (in meters).
+    """
+    MILE_TO_METER = 1609.34
+
+    # Load lane data
+    lanes_df = pd.read_csv(lanes_path).copy()
+    lanes_df["x_start_m"] = lanes_df["x_start_mile"] * MILE_TO_METER
+    lanes_df["x_end_m"] = lanes_df["x_end_mile"] * MILE_TO_METER
+    lanes_df["x_min_m"] = lanes_df[["x_start_m", "x_end_m"]].min(axis=1)
+    lanes_df["x_max_m"] = lanes_df[["x_start_m", "x_end_m"]].max(axis=1)
+    lanes_df = lanes_df.sort_values("x_min_m").reset_index(drop=True)
+
+    # Use provided min/max range if given
+    if min_pos is None:
+        min_pos = lanes_df["x_min_m"].min()
+    if max_pos is None:
+        max_pos = lanes_df["x_max_m"].max()
+
+    # Uniform bins
+    space_bins = np.arange(min_pos, max_pos + space_interval, space_interval)
+    bin_midpoints_m = 0.5 * (space_bins[:-1] + space_bins[1:])
+
+    lanes_per_bin = np.zeros(len(space_bins) - 1)
+
+    for i in range(len(space_bins) - 1):
+        seg_start, seg_end = space_bins[i], space_bins[i + 1]
+        overlapping = lanes_df[
+            (lanes_df["x_max_m"] > seg_start) & (lanes_df["x_min_m"] < seg_end)
+        ]
+
+        if overlapping.empty:
+            lanes_per_bin[i] = lanes_per_bin[i - 1] if i > 0 else np.nan
+            continue
+
+        overlap_lengths = np.minimum(overlapping["x_max_m"], seg_end) \
+                        - np.maximum(overlapping["x_min_m"], seg_start)
+        overlap_lengths = np.clip(overlap_lengths, 0, None)
+
+        if np.any(overlap_lengths > 0):
+            lanes_per_bin[i] = np.average(overlapping["lanes"], weights=overlap_lengths)
+        else:
+            lanes_per_bin[i] = overlapping["lanes"].mean()
+
+    if direction == "west":
+        lanes_per_bin = lanes_per_bin[::-1]
+        space_bins = space_bins[::-1]
+        bin_midpoints_m = bin_midpoints_m[::-1]
+
+    return lanes_per_bin, space_bins, bin_midpoints_m
