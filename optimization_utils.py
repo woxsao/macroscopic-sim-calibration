@@ -444,15 +444,17 @@ def metanet_param_fit(
 
     # Solve
     solver = SolverFactory("ipopt")
-    solver.options["tol"] = 1e-15
-    solver.options["constr_viol_tol"] = 1e-10    # constraint violation tolerance
-    solver.options["acceptable_tol"] = 1e-9      # early stopping criterion
-    solver.options["acceptable_constr_viol_tol"] = 1e-9
-    solver.options["dual_inf_tol"] = 1e-10       # dual infeasibility tolerance
-    solver.options["compl_inf_tol"] = 1e-10       
+    # solver.options["tol"] = 1e-15
+    # solver.options["constr_viol_tol"] = 1e-10    # constraint violation tolerance
+    # solver.options["acceptable_tol"] = 1e-9      # early stopping criterion
+    # solver.options["acceptable_constr_viol_tol"] = 1e-9
+    # solver.options["dual_inf_tol"] = 1e-10       # dual infeasibility tolerance
+    # solver.options["compl_inf_tol"] = 1e-10       
     solver.options["max_iter"] = 20000
     solver.options['acceptable_constr_viol_tol'] = 1e-12
     solver.options['constr_viol_tol'] = 1e-12
+    # solver.options["dual_inf_tol"] = 1e-11
+    # solver.options["acceptable_dual_inf_tol"] = 1e-11
     solver.solve(model, tee=True)
 
     return model
@@ -527,10 +529,9 @@ def run_calibration(
         "a": [],
         "num_lanes": [],
     }
-    if include_ramping:
         # results["gamma"] = []
-        results["beta"] = []
-        results["r_inflow"] = []
+    results["beta"] = []
+    results["r_inflow"] = []
         
 
     total_segments = rho_hat.shape[1] - 2 if sep_boundary_conditions is None else rho_hat.shape[1] # exclude first + last for boundary cond
@@ -636,22 +637,22 @@ def run_calibration(
         results["num_lanes"].extend(
             [value(res_model.n_lanes[i]) for i in range(num_segments)]
         )
-        if include_ramping:
+        # if include_ramping:
             # results["gamma"].extend([value(res_model.gamma[i]) for i in range(num_segments)])
-            results["beta"].extend(
-                [value(res_model.beta[i]) for i in range(num_segments)]
-            )
-            results["r_inflow"].extend(
-                [value(res_model.r_inflow[i]) for i in range(num_segments)]
-            )
+        results["beta"].extend(
+            [value(res_model.beta[i]) for i in range(num_segments)]
+        )
+        results["r_inflow"].extend(
+            [value(res_model.r_inflow[i]) for i in range(num_segments)]
+        )
 
     # Convert parameter lists to numpy arrays
     for key in ["tau", "K", "eta_high", "rho_crit", "v_free", "a", "num_lanes"]:
         results[key] = np.array(results[key])
-    if include_ramping:
+    # if include_ramping:
         # results["gamma"] = np.array(results["gamma"])
-        results["beta"] = np.array(results["beta"])
-        results["r_inflow"] = np.array(results["r_inflow"])
+    results["beta"] = np.array(results["beta"])
+    results["r_inflow"] = np.array(results["r_inflow"])
     return results
 
 
