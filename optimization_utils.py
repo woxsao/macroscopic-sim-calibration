@@ -192,7 +192,9 @@ def metanet_param_fit(
     num_calibrated_segments,
     include_ramping=True,
     varylanes=True,
-    lane_mapping=None
+    lane_mapping=None,
+    on_ramp_mapping=None,
+    off_ramp_mapping=None
 ):
     initial_flow_or = initial_traffic_state
     
@@ -242,9 +244,19 @@ def metanet_param_fit(
     model.a = Var(model.i, bounds=(0.01, 10), initialize=1.4)
 
     if include_ramping:
-        # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
         model.beta = Var(model.i, bounds=(1e-3, 0.9), initialize=1e-3)
         model.r_inflow = Var(model.i, bounds=(1e-3, 2000), initialize=1e-3)
+        if on_ramp_mapping is not None and off_ramp_mapping is not None:
+            # set bounds based on mappings
+            for i in model.i:
+                if on_ramp_mapping[i] == 0:
+                    model.r_inflow[i].setlb(0.0)
+                    model.r_inflow[i].setub(0.0)
+                if off_ramp_mapping[i] == 0:
+                    model.beta[i].setlb(0.0)
+                    model.beta[i].setub(0.0)
+        # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
+        
 
         # model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
         # model.r_inflow = Var(model.i, bounds=(-2000, 2000), initialize=200)
@@ -470,6 +482,8 @@ def run_calibration(
     include_ramping=True,
     varylanes=True,
     lane_mapping=None,
+    on_ramp_mapping=None,
+    off_ramp_mapping=None,
     smoothing=True
 ):
     """
@@ -570,7 +584,9 @@ def run_calibration(
             num_calibrated_segments,
             include_ramping=include_ramping,
             varylanes=varylanes,
-            lane_mapping=lane_mapping,
+            lane_mapping=lane_mapping[start_idx:end_idx] if lane_mapping is not None else None,
+            on_ramp_mapping=on_ramp_mapping[start_idx:end_idx] if on_ramp_mapping is not None else None,
+            off_ramp_mapping=off_ramp_mapping[start_idx:end_idx] if off_ramp_mapping is not None else None
         )
 
         num_timesteps, num_segments = segment_v_hat.shape
