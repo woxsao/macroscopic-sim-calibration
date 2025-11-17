@@ -129,18 +129,17 @@ def metanet_step(t: int,
     for i in range(num_segments):
         beta = _get_time_space_param(params["beta"], t if np.ndim(params["beta"]) == 2 else 0, i)
         r = _get_time_space_param(params["r"], t if np.ndim(params["r"]) == 2 else 0, i)
-        gamma = _get_time_space_param(params["gamma"], 0, i)
 
         if i == 0:
             inflow = demand[t] if real_data else flow_origin_t
             outflow = density_t[i] * velocity_t[i] * lanes[i]
             density_tp1[i] = density_dynamics(density_t[i], inflow, outflow, lanes[i], T, l,
-                                              gamma=gamma, beta=beta, r=r)
+                                              gamma=0.0, beta=beta, r=r)
         else:
             inflow = density_t[i - 1] * velocity_t[i - 1] * lanes[i - 1]
             outflow = density_t[i] * velocity_t[i] * lanes[i]
             density_tp1[i] = density_dynamics(density_t[i], inflow, outflow, lanes[i], T, l,
-                                              gamma=gamma, beta=beta, r=r)
+                                              gamma=0.0, beta=beta, r=r)
 
     # --- velocity update ---
     velocity_tp1 = np.empty_like(velocity_t, dtype=float)
@@ -214,7 +213,6 @@ def run_metanet_sim(T: float,
     """
     time_steps = downstream_density.shape[0]
     num_segments = init_traffic_state[0].shape[0]
-    print(time_steps, num_segments)
 
     if vsl_speeds is None:
         vsl_speeds = np.full((time_steps, num_segments), 1000)  # effectively no speed limit
