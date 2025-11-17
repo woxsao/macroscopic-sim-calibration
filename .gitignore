@@ -2,8 +2,8 @@
 data/*
 i24-data/*
 calibration_results/*
-perturb_results/*
-synthetic-calibration_results/*
+perturb-results/*
+synthetic-calibration-results/*
 synthetic-scenario/*
 
 # ...but keep the placeholder file
