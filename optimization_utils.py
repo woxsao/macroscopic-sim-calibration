@@ -244,6 +244,7 @@ def metanet_param_fit(
     model.a = Var(model.i, bounds=(0.01, 10), initialize=1.4)
 
     if include_ramping:
+        # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
         model.beta = Var(model.i, bounds=(1e-3, 0.9), initialize=1e-3)
         model.r_inflow = Var(model.i, bounds=(1e-3, 2000), initialize=1e-3)
         if on_ramp_mapping is not None and off_ramp_mapping is not None:
@@ -255,9 +256,6 @@ def metanet_param_fit(
                 if off_ramp_mapping[i] == 0:
                     model.beta[i].setlb(0.0)
                     model.beta[i].setub(0.0)
-        # model.gamma = Var(model.i, bounds=(0.5, 1.5), initialize=1)
-        
-
         # model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
         # model.r_inflow = Var(model.i, bounds=(-2000, 2000), initialize=200)
         # model.beta = Var(model.i, bounds=(-1.0, 1.0), initialize=0.5)
@@ -464,7 +462,7 @@ def metanet_param_fit(
     # solver.options["compl_inf_tol"] = 1e-10       
     solver.options["max_iter"] = 20000
     solver.options['acceptable_constr_viol_tol'] = 1e-12
-    solver.options['constr_viol_tol'] = 1e-12
+    solver.options['constr_viol_tol'] = 1e-8
     # solver.options["dual_inf_tol"] = 1e-11
     # solver.options["acceptable_dual_inf_tol"] = 1e-11
     solver.solve(model, tee=True)
@@ -548,25 +546,54 @@ def run_calibration(
     results["r_inflow"] = []
         
 
-    total_segments = rho_hat.shape[1] - 2 if sep_boundary_conditions is None else rho_hat.shape[1] # exclude first + last for boundary cond
-    # Loop through groups of segments
-    start_segment = 1 if sep_boundary_conditions is None else 0
+    n_segments = rho_hat.shape[1]
 
-    for start_idx in range(start_segment, total_segments + 1, num_calibrated_segments):
-        end_idx = min(start_idx + num_calibrated_segments, total_segments + 1)
-        print(start_idx, end_idx)
+    # If sep_boundary_conditions is None we exclude the first (upstream) and last (downstream) columns
+    if sep_boundary_conditions is None:
+        # calibrate only "interior" segments, keep upstream inflow and downstream density as boundaries
+        start_segment = 1
+        end_segment_exclusive = n_segments - 1
+    else:
+        # sep boundary conds already supply boundaries; calibrate all segments
+        start_segment = 0
+        end_segment_exclusive = n_segments
+
+    if start_segment >= end_segment_exclusive:
+        raise ValueError(
+            f"No segments to calibrate: start_segment={start_segment}, "
+            f"end_segment_exclusive={end_segment_exclusive}, n_segments={n_segments}"
+        )
+
+    for start_idx in range(start_segment, end_segment_exclusive, num_calibrated_segments):
+        end_idx = min(start_idx + num_calibrated_segments, end_segment_exclusive)
+        # defensive check: ensure the slice is non-empty
+        if end_idx <= start_idx:
+            # shouldn't happen due to the loop setup, but guard anyway
+            continue
+
+        # logging for debugging
+        print(f"Calibrating segments [{start_idx}:{end_idx}) out of {n_segments}")
+
         # Slice for this group
         segment_rho_hat = rho_hat[:, start_idx:end_idx]
         segment_v_hat = v_hat[:, start_idx:end_idx]
         segment_q_hat = q_hat[:, start_idx:end_idx]
+
+        # safety: if any slice is empty, raise a helpful error
+        if segment_rho_hat.shape[1] == 0 or segment_v_hat.shape[1] == 0 or segment_q_hat.shape[1] == 0:
+            raise ValueError(
+                f"Empty slice for calibration block: start_idx={start_idx}, end_idx={end_idx}, "
+                f"shapes rho_hat={segment_rho_hat.shape}, v_hat={segment_v_hat.shape}, q_hat={segment_q_hat.shape}. "
+                "Check num_calibrated_segments and boundary-condition indexing."
+            )
 
         # Boundary conditions depend on group position
         if sep_boundary_conditions is not None:
             initial_flow = sep_boundary_conditions["initial_flow"]
             downstream_density = sep_boundary_conditions["downstream_density"]
         else:
-            initial_flow = q_hat[:, start_idx - 1 : start_idx]  # upstream inflow
-            downstream_density = rho_hat[:, end_idx : end_idx + 1]
+            initial_flow = q_hat[:, start_idx - 1 : start_idx]  # upstream inflow (one column)
+            downstream_density = rho_hat[:, end_idx : end_idx + 1]  # downstream density (one column)
 
         if smoothing:
             initial_flow = smooth_inflow(initial_flow)  # upstream inflow
@@ -598,33 +625,7 @@ def run_calibration(
             for i in range(num_segments):
                 v_pred_array[t, i] = value(res_model.v_pred[t, i])
                 rho_pred_array[t, i] = value(res_model.rho_pred[t, i])
-        # 7th segment check
 
-        current = v_pred_array[0, 7]
-        prev_state = v_pred_array[0, 6]
-        density = rho_pred_array[0, 7] / value(res_model.n_lanes[7])
-        next_density = rho_pred_array[0, 8] / value(res_model.n_lanes[8])
-        seg = 7
-        VSL = 150
-        T = 10 / 3600
-        l = 0.4
-        print(
-            "checking 7th segment",
-            value(
-                velocity_dynamics(
-                    res_model,
-                    current,
-                    prev_state,
-                    density,
-                    next_density,
-                    VSL,
-                    T,
-                    l,
-                    seg,
-                )
-            ),
-        )
-        print("v pred", value(res_model.v_pred[1, 7]))
         # Append predictions
         if len(results["v_pred"]) == 0:
             results["v_pred"] = v_pred_array
