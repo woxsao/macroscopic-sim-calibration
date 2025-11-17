@@ -2,6 +2,9 @@
 data/*
 i24-data/*
 calibration_results/*
+perturb_results/*
+synthetic-calibration_results/*
+synthetic-scenario/*
 
 # ...but keep the placeholder file
 !data/.gitkeep
