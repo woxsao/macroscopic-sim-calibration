@@ -194,7 +194,8 @@ def metanet_param_fit(
     varylanes=True,
     lane_mapping=None,
     on_ramp_mapping=None,
-    off_ramp_mapping=None
+    off_ramp_mapping=None,
+    time_varying_ramping = False
 ):
     initial_flow_or = initial_traffic_state
     
@@ -248,14 +249,27 @@ def metanet_param_fit(
         model.beta = Var(model.i, bounds=(1e-3, 0.9), initialize=1e-3)
         model.r_inflow = Var(model.i, bounds=(1e-3, 2000), initialize=1e-3)
         if on_ramp_mapping is not None and off_ramp_mapping is not None:
-            # set bounds based on mappings
-            for i in model.i:
-                if on_ramp_mapping[i] == 0:
-                    model.r_inflow[i].setlb(0.0)
-                    model.r_inflow[i].setub(0.0)
-                if off_ramp_mapping[i] == 0:
-                    model.beta[i].setlb(0.0)
-                    model.beta[i].setub(0.0)
+
+            if time_varying_ramping:
+                model.beta = Var(model.t, model.i, bounds=(1e-3, 0.9), initialize ={(t, i): 1e-3 for t in model.t for i in model.i})
+                model.r_inflow = Var(model.t, model.i, bounds=(1e-3, 2000), initialize ={(t, i): 1e-3 for t in model.t for i in model.i})
+                for t in model.t:
+                    for i in model.i:
+                        if on_ramp_mapping[i] == 0:
+                            model.r_inflow[t,i].setlb(0.0)
+                            model.r_inflow[t,i].setub(0.0)
+                        if off_ramp_mapping[i] == 0:
+                            model.beta[t,i].setlb(0.0)
+                            model.beta[t,i].setub(0.0)
+
+            else: # set bounds based on mappings
+                for i in model.i:
+                    if on_ramp_mapping[i] == 0:
+                        model.r_inflow[i].setlb(0.0)
+                        model.r_inflow[i].setub(0.0)
+                    if off_ramp_mapping[i] == 0:
+                        model.beta[i].setlb(0.0)
+                        model.beta[i].setub(0.0)
         # model.beta = Var(model.i, bounds=(0.0, 0.0), initialize=0.0)
         # model.r_inflow = Var(model.i, bounds=(-2000, 2000), initialize=200)
         # model.beta = Var(model.i, bounds=(-1.0, 1.0), initialize=0.5)
@@ -344,16 +358,28 @@ def metanet_param_fit(
             inflow = m.rho_pred[t - 1, i - 1] * m.v_pred[t - 1, i - 1]
             outflow = m.rho_pred[t - 1, i] * m.v_pred[t - 1, i]
         if include_ramping:
-            return m.rho_pred[t, i] == density_dynamics(
-                current,
-                inflow,
-                outflow,
-                model.T,
-                model.l,
-                model.n_lanes[i],
-                model.beta[i],
-                model.r_inflow[i],
-            )
+            if time_varying_ramping:
+                return m.rho_pred[t, i] == density_dynamics(
+                    current,
+                    inflow,
+                    outflow,
+                    model.T,
+                    model.l,
+                    model.n_lanes[i],
+                    model.beta[t-1,i],
+                    model.r_inflow[t-1,i],
+                )
+            else:
+                return m.rho_pred[t, i] == density_dynamics(
+                    current,
+                    inflow,
+                    outflow,
+                    model.T,
+                    model.l,
+                    model.n_lanes[i],
+                    model.beta[i],
+                    model.r_inflow[i],
+                )
         else:
             return m.rho_pred[t, i] == density_dynamics(
                 current, inflow, outflow, model.T, model.l, model.n_lanes[i], 0.0, 0.0
@@ -392,6 +418,22 @@ def metanet_param_fit(
         )
 
     model.v_dyn = Constraint(model.t, model.i, rule=v_update)
+
+    # every other segment
+    # def loss_fn(m):
+    #     # only sum every other segment
+    #     # find max values for normalization
+    #     v_max = max(m.v_hat[t, i] for t in m.t for i in m.i if i % 2 == 0)
+    #     rho_max = max(m.rho_hat[t, i] for t in m.t for i in m.i if i % 2 == 0)
+    #     q_max = max(m.q_hat[t, i] for t in m.t for i in m.i if i % 2 == 0)
+    #     return sum(
+    #         (((m.v_pred[t, i] - m.v_hat[t, i]) / v_max)) ** 2
+    #         + ((m.rho_pred[t, i] - m.rho_hat[t, i]) / rho_max) ** 2
+    #         + ((m.q_pred[t, i] - m.q_hat[t, i]) / q_max) ** 2
+    #         for t in m.t
+    #         for i in m.i
+    #         if i % 2 == 0
+    #     )
 
     # Objective: per-lane error
     def loss_fn(m):
@@ -461,8 +503,8 @@ def metanet_param_fit(
     # solver.options["dual_inf_tol"] = 1e-10       # dual infeasibility tolerance
     # solver.options["compl_inf_tol"] = 1e-10       
     solver.options["max_iter"] = 20000
-    solver.options['acceptable_constr_viol_tol'] = 1e-12
-    solver.options['constr_viol_tol'] = 1e-8
+    solver.options['acceptable_constr_viol_tol'] = 1e-30
+    solver.options['constr_viol_tol'] = 1e-11
     # solver.options["dual_inf_tol"] = 1e-11
     # solver.options["acceptable_dual_inf_tol"] = 1e-11
     solver.solve(model, tee=True)
@@ -482,7 +524,8 @@ def run_calibration(
     lane_mapping=None,
     on_ramp_mapping=None,
     off_ramp_mapping=None,
-    smoothing=True
+    smoothing=True,
+    time_varying_ramping = False
 ):
     """
     Run METANET parameter calibration with configurable segment grouping.
@@ -506,26 +549,6 @@ def run_calibration(
         Dictionary with concatenated predictions and parameter arrays.
     """
 
-    def calculate_V(m, rho, VSL, seg):
-        return m.v_free[seg] * pyo.exp(
-            -1 / m.a[seg] * (rho / m.rho_crit[seg]) ** m.a[seg]
-        )
-
-    def velocity_dynamics(
-        m, current, prev_state, density, next_density, VSL, T, l, seg
-    ):
-        tau = m.tau[seg]
-        eta = m.eta_high[seg]
-        K = m.K[seg]
-        v_eq = calculate_V(m, density, VSL, seg)
-        term1 = T / tau * (v_eq - current)
-        term2 = T / l * current * (prev_state - current)
-        term3 = (eta * T) / (tau * l) * (next_density - density) / (density + K)
-        return current + term1 + term2 - term3
-
-    # Ensure no divide-by-zero
-    # rho_hat = np.where(rho_hat == 0.0, 1e-3, rho_hat)
-    # q_hat = np.where(q_hat == 0.0, 1e-3, q_hat)
     v_hat = q_hat / rho_hat
     # v_hat = np.where(v_hat == 0.0, 1e-3, v_hat)
 
@@ -613,7 +636,8 @@ def run_calibration(
             varylanes=varylanes,
             lane_mapping=lane_mapping[start_idx:end_idx] if lane_mapping is not None else None,
             on_ramp_mapping=on_ramp_mapping[start_idx:end_idx] if on_ramp_mapping is not None else None,
-            off_ramp_mapping=off_ramp_mapping[start_idx:end_idx] if off_ramp_mapping is not None else None
+            off_ramp_mapping=off_ramp_mapping[start_idx:end_idx] if off_ramp_mapping is not None else None,
+            time_varying_ramping = time_varying_ramping
         )
 
         num_timesteps, num_segments = segment_v_hat.shape
@@ -656,12 +680,20 @@ def run_calibration(
         )
         # if include_ramping:
             # results["gamma"].extend([value(res_model.gamma[i]) for i in range(num_segments)])
-        results["beta"].extend(
-            [value(res_model.beta[i]) for i in range(num_segments)]
-        )
-        results["r_inflow"].extend(
-            [value(res_model.r_inflow[i]) for i in range(num_segments)]
-        )
+        if time_varying_ramping:
+            results["beta"] = np.ndarray((num_timesteps, num_segments))
+            results["r_inflow"] = np.ndarray((num_timesteps, num_segments))
+            for t in range(num_timesteps):
+                for i in range(num_segments):
+                    results["beta"][t, i] = value(res_model.beta[t, i])
+                    results["r_inflow"][t, i] = value(res_model.r_inflow[t, i])
+        else:
+            results["beta"].extend(
+                [value(res_model.beta[i]) for i in range(num_segments)]
+            )
+            results["r_inflow"].extend(
+                [value(res_model.r_inflow[i]) for i in range(num_segments)]
+            )
 
     # Convert parameter lists to numpy arrays
     for key in ["tau", "K", "eta_high", "rho_crit", "v_free", "a", "num_lanes"]:

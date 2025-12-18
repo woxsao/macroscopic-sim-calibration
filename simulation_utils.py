@@ -22,18 +22,18 @@ def queue_dynamics(current: float, demand: float, flow_origin: float, T: float) 
     return current + T * (demand - flow_origin)
 
 
-def calculate_V(rho: float, v_ctrl: float, a: float, p_crit: float, v_free: float = 150.0) -> float:
+def calculate_V(rho: float, v_ctrl: float, a: float, rho_crit: float, v_free: float = 150.0) -> float:
     """Desired speed function V(rho), capped by control speed v_ctrl."""
     # prevent overflow warnings
-    # p_crit += 1e-4
+    # rho_crit += 1e-4
     # a += 1e-4
-    # assert - (rho / p_crit) ** a / a < 700, f"Overflow in desired speed calculation, pow too large: { - (rho / p_crit) ** a / a}, rho={rho}, p_crit={p_crit}, a={a}"
-    return v_free * np.exp(- (rho / p_crit) ** a / a)
+    # assert - (rho / rho_crit) ** a / a < 700, f"Overflow in desired speed calculation, pow too large: { - (rho / rho_crit) ** a / a}, rho={rho}, rho_crit={rho_crit}, a={a}"
+    return v_free * np.exp(- (rho / rho_crit) ** a / a)
 
 
-def calculate_V_arr(rho_arr: np.ndarray, v_ctrl_arr: np.ndarray, a: float, p_crit: float, v_free: float) -> np.ndarray:
+def calculate_V_arr(rho_arr: np.ndarray, v_ctrl_arr: np.ndarray, a: float, rho_crit: float, v_free: float) -> np.ndarray:
     """Vectorized desired speed function. Not used in sim, but useful for plotting."""
-    return np.minimum(v_free * np.exp(- (rho_arr / p_crit) ** a / a), v_ctrl_arr)
+    return np.minimum(v_free * np.exp(- (rho_arr / rho_crit) ** a / a), v_ctrl_arr)
 
 
 def velocity_dynamics_MN(current: float,
@@ -47,14 +47,14 @@ def velocity_dynamics_MN(current: float,
                          K: float = 40.0,
                          tau: float = 18 / 3600,
                          a: float = 1.4,
-                         p_crit: float = 37.45,
+                         rho_crit: float = 37.45,
                          v_free: float = 120.0) -> float:
     """One-step METANET velocity update with standard terms.
     Returns a small positive floor to avoid non-physical negative velocities.
     """
     nxt = (
         current
-        + T / tau * (calculate_V(density, v_ctrl, a, p_crit, v_free) - current)
+        + T / tau * (calculate_V(density, v_ctrl, a, rho_crit, v_free) - current)
         + T / l * current * (prev_state - current)
         - (eta_high * T) / (tau * l) * (next_density - density) / (density + K)
     )
@@ -67,12 +67,12 @@ def origin_flow_dynamics_MN(demand: float,
                             lanes: int,
                             T: float,
                             p_max: float = 180.0,
-                            p_crit: float = 37.45,
+                            rho_crit: float = 37.45,
                             q_capacity: float = 2200.0) -> float:
     """Origin (on-ramp) sending/merging flow constraint."""
     return min(
         demand + queue / T,
-        lanes * q_capacity * (p_max - density_first) / (p_max - p_crit),
+        lanes * q_capacity * (p_max - density_first) / (p_max - rho_crit),
         lanes * q_capacity,
     )
 
@@ -111,7 +111,7 @@ def metanet_step(t: int,
         vsl_speeds: (time_steps, num_segments) control speeds.
         demand: (time_steps,) exogenous demand at origin.
         downstream_density: (time_steps,) boundary density at downstream end.
-        params: dict with keys 'beta','r','gamma','eta_high','K','tau','a','p_crit','v_free','q_capacity'.
+        params: dict with keys 'beta','r','gamma','eta_high','K','tau','a','rho_crit','v_free','q_capacity'.
         lanes: dict mapping segment index -> number of lanes.
         real_data: if True, use demand directly for first cell inflow; otherwise use origin flow.
         upstream_velocity: optional (time_steps,) boundary velocity for the first cell.
@@ -126,6 +126,7 @@ def metanet_step(t: int,
     density_tp1 = np.empty_like(density_t, dtype=float)
 
     # --- density update ---
+
     for i in range(num_segments):
         beta = _get_time_space_param(params["beta"], t if np.ndim(params["beta"]) == 2 else 0, i)
         r = _get_time_space_param(params["r"], t if np.ndim(params["r"]) == 2 else 0, i)
@@ -149,7 +150,7 @@ def metanet_step(t: int,
             K=_get_time_space_param(params["K"], t, i),
             tau=_get_time_space_param(params["tau"], t, i),
             a=_get_time_space_param(params["a"], t, i),
-            p_crit=_get_time_space_param(params["p_crit"], t, i),
+            rho_crit=_get_time_space_param(params["rho_crit"], t, i),
             v_free=_get_time_space_param(params["v_free"], t, i),
         )
         if i == 0:
@@ -184,10 +185,10 @@ def metanet_step(t: int,
     elif real_data:
         flow_origin_tp1 = flow_origin_t
     else:
-        pcrit0 = _get_time_space_param(params["p_crit"], t+1, 0)
+        pcrit0 = _get_time_space_param(params["rho_crit"], t+1, 0)
         qcap0 = _get_time_space_param(params["q_capacity"], t+1, 0)
         flow_origin_tp1 = origin_flow_dynamics_MN(
-            demand[t + 1], density_tp1[0], queue_tp1, lanes[0], T, p_max=180.0, p_crit=pcrit0, q_capacity=qcap0
+            demand[t + 1], density_tp1[0], queue_tp1, lanes[0], T, p_max=180.0, rho_crit=pcrit0, q_capacity=qcap0
         )
 
     return density_tp1, velocity_tp1, queue_tp1, flow_origin_tp1, flow_tp1
@@ -220,7 +221,6 @@ def run_metanet_sim(T: float,
         lanes = {i: 1 for i in range(num_segments)}
 
     initial_density, initial_velocity, initial_flow_or, initial_queue = init_traffic_state
-
     # Allocate histories
     density = np.zeros((time_steps + 1, num_segments), dtype=float)
     velocity = np.zeros((time_steps + 1, num_segments), dtype=float)
@@ -271,7 +271,7 @@ def run_metanet_sim(T: float,
             density[0:-1],
             vsl_speeds,
             params["a"][0],
-            params["p_crit"][0],
+            params["rho_crit"][0],
             params["v_free"][0],
         )
         return density, velocity, queue, flow_origin, V_fd, total_travel_time
